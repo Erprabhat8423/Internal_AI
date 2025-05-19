@@ -9,6 +9,7 @@ import numpy as np
 from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
 import dotenv
+from sqlalchemy.orm import Session
 from os import getenv
 dotenv.load_dotenv()
 GROQ_API_KEY = getenv("GROQ_API_KEY")
@@ -99,68 +100,78 @@ async def upload_document(file: UploadFile = File(...)):
         "faiss_index": faiss_index
     }
 
-# Query API supporting multiple documents
+
 @app.get("/query/")
 async def query_document(question: str = Query(..., description="Enter your search query")):
-    load_faiss_index()
+    # Get embedding for the question
     query_embedding = get_embedding(question)
 
-    # 🔍 Retrieve top-k results
+    # Retrieve top-k results using FAISS
     k = 3
     distances, indices = index.search(np.array([query_embedding], dtype=np.float32), k)
     matched_indices = [int(idx) for idx in indices[0] if idx != -1]
 
     if not matched_indices:
-        return {"message": "No relevant documents found."}
+        return {"message": "No relevant documents found in my knowledge base."}
 
-    # 📄 Get documents from DB
-    db = SessionLocal()
+    # Retrieve matching documents from the database
+    db: Session = SessionLocal()
     matched_docs = db.query(Document).filter(Document.faiss_index.in_(matched_indices)).all()
     db.close()
 
     if not matched_docs:
-        return {"message": "No matching documents found in database."}
+        return {"message": "No matching documents found in my knowledge base."}
 
-    # 🧠 Truncate each document content to ~1500 tokens (~4500 total)
-    def truncate_text(text, max_chars=6000):
-        return text[:max_chars]
+    # Truncate each document content to prevent context overflow
+    def truncate_text(text, max_chars=2000):
+        return text[:max_chars] if text else ""
 
     combined_content = "\n\n".join([
-        f"{doc.filename}:\n{truncate_text(doc.content, 2000)}"
+        f"{doc.filename}:\n{truncate_text(doc.content)}"
         for doc in matched_docs
     ])
 
-    # 🔥 Ask Groq for answer
+    # Strict QA Prompt
+    strict_prompt = f"""
+    You are a document-based QA assistant.
+
+    Only use the text from the provided documents below to answer the question.
+    If the answer is NOT present, respond exactly:
+    "The answer is not found in the provided documents."
+
+    DOCUMENTS:
+    {combined_content}
+
+    QUESTION:
+    {question}
+    """
+
+    # Call Groq LLM (deepseek-r1-distill-llama-70b)
     try:
         response = groq_client.chat.completions.create(
             model="deepseek-r1-distill-llama-70b",
             messages=[
-                {"role": "system", "content": "You are an AI assistant that extracts precise answers from multiple documents."},
-                {"role": "user", "content": f"Documents:\n{combined_content}\n\nQuestion: {question}\n\nExtract the exact answer from relevant documents."}
+                {"role": "system", "content": "You are a strict document-based QA assistant."},
+                {"role": "user", "content": strict_prompt}
             ],
-            temperature=0.3,
+            temperature=0.0,
             max_tokens=1000
         )
         exact_answer = response.choices[0].message.content.strip()
-    except groq.APIStatusError as e:
-        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"LLM API failed: {str(e)}"}
 
+    # Check if the model failed to find an answer
     fallback_phrases = [
-        "no mention", 
-        "does not appear", 
-        "no information", 
-        "not contain any information", 
-        "there is no", 
-        "unable to find"
+        "no mention", "does not appear", "no information", "not contain any information",
+        "there is no", "unable to find", "not found in the provided documents"
     ]
-
-    # Lowercase for safe matching
     if any(phrase in exact_answer.lower() for phrase in fallback_phrases):
         return {
-            "message": "🙏 We're sorry, we don't have such a document to answer your query."
+            "message": "🙏 I’m sorry, I couldn’t find an exact answer in my knowledge base."
         }
 
-    # ✅ Return only when confident answer is extracted
+    # Final response
     return {
         "query": question,
         "retrieved_documents": [doc.filename for doc in matched_docs],
