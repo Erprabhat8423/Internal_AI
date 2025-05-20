@@ -11,9 +11,11 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import dotenv
 from sqlalchemy.orm import Session
 from os import getenv
-from typing import List, Dict
+from typing import List, Dict, Optional
+
 from pydantic import BaseModel
 from fastapi import Body
+
 
 dotenv.load_dotenv()
 GROQ_API_KEY = getenv("GROQ_API_KEY")
@@ -37,9 +39,9 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-class QueryRequest(BaseModel):
+class QueryPayload(BaseModel):
     question: str
-    history: List[Dict[str, str]]    # [{"q": "...", "a": "..."}, …]
+    context: Optional[str] = ""
 
 # SQLAlchemy Document model
 class Document(Base):
@@ -109,28 +111,27 @@ async def upload_document(file: UploadFile = File(...)):
     }
 
 
-@app.get("/query/")
-async def query_document(question: str = Query(..., description="Enter your search query")):
-    # Get embedding for the question
-    query_embedding = get_embedding(question)
+# Query documents
+@app.post("/query/")
+async def query_document(payload: QueryPayload):
+    question = payload.question
+    context = payload.context or ""
 
-    # Retrieve top-k results using FAISS
+    query_embedding = get_embedding(question)
     k = 3
     distances, indices = index.search(np.array([query_embedding], dtype=np.float32), k)
     matched_indices = [int(idx) for idx in indices[0] if idx != -1]
 
     if not matched_indices:
-        return {"message": "No relevant documents found in my knowledge base."}
+        return {"answer": "I couldn't find anything useful in the documents.", "source": None}
 
-    # Retrieve matching documents from the database
     db: Session = SessionLocal()
     matched_docs = db.query(Document).filter(Document.faiss_index.in_(matched_indices)).all()
     db.close()
 
     if not matched_docs:
-        return {"message": "No matching documents found in my knowledge base."}
+        return {"answer": "No document found for your query.", "source": None}
 
-    # Truncate each document content to prevent context overflow
     def truncate_text(text, max_chars=2000):
         return text[:max_chars] if text else ""
 
@@ -139,22 +140,27 @@ async def query_document(question: str = Query(..., description="Enter your sear
         for doc in matched_docs
     ])
 
-    # Strict QA Prompt
-    strict_prompt = f"""
-    You are a document-based QA assistant.
+    top_doc_name = matched_docs[0].filename if matched_docs else None
 
-    Only use the text from the provided documents below to answer the question.
-    If the answer is NOT present, respond exactly:
-    "The answer is not found in the provided documents."
+    strict_prompt = f"""
+    You are a helpful and smart assistant.
+
+    Use the DOCUMENTS below and the prior CHAT CONTEXT to answer the QUESTION.
+    If the document has the answer — prioritize it. If not, use your reasoning based on the conversation to respond.
 
     DOCUMENTS:
     {combined_content}
 
+    CHAT CONTEXT:
+    {context}
+
     QUESTION:
     {question}
+
+    Respond concisely and clearly.
     """
 
-    # Call Groq LLM (deepseek-r1-distill-llama-70b)
+
     try:
         response = groq_client.chat.completions.create(
             model="deepseek-r1-distill-llama-70b",
@@ -167,21 +173,15 @@ async def query_document(question: str = Query(..., description="Enter your sear
         )
         exact_answer = response.choices[0].message.content.strip()
     except Exception as e:
-        return {"error": f"LLM API failed: {str(e)}"}
+        return {"answer": f"Unable to connect with model.", "source": None}
 
-    # Check if the model failed to find an answer
     fallback_phrases = [
         "no mention", "does not appear", "no information", "not contain any information",
         "there is no", "unable to find", "not found in the provided documents"
     ]
     if any(phrase in exact_answer.lower() for phrase in fallback_phrases):
         return {
-            "message": "🙏 I’m sorry, I couldn’t find an exact answer in my knowledge base."
+            "answer": "I'm sorry, I couldn't find an exact answer in my knowledge base.",
+            "source": None
         }
-
-    # Final response
-    return {
-        "query": question,
-        "retrieved_documents": [doc.filename for doc in matched_docs],
-        "exact_answer": exact_answer
-    }
+    return {"answer": exact_answer, "source": top_doc_name}
