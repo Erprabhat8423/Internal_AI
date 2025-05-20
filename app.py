@@ -23,79 +23,185 @@ tab1, tab2 = st.tabs(["💬 Ask a Question", "📤 Upload & View Documents"])
 
 # —— Tab 1: WhatsApp-style Chat UI ——
 with tab1:
-    # Inject custom CSS
-    st.markdown("<div id='chat-wrapper'>", unsafe_allow_html=True)
+    # Inject clean styles
+    st.markdown("""
+    <style>
+    .stMainBlockContainer { padding-top: 0px; padding-bottom: 0px; }
+    .chat-box {
+        background: #f8f9fa;
+        padding: 12px;
+        border-radius: 12px;
+        max-height: 60vh;
+        overflow-y: auto;
+        margin-bottom: 12px;
+        display: flex;
+        flex-direction: column;
+    }
+    .chat-msg {
+        padding: 10px 16px;
+        margin: 4px 0;
+        border-radius: 16px;
+        max-width: 75%;
+        word-wrap: break-word;
+    }
+    .user-msg {
+        background-color: #ffffff;
+        align-self: flex-end;
+        border: 1px solid #ddd;
+    }
+    .bot-msg {
+        background-color: #dcf8c6;
+        align-self: flex-start;
+        border: 1px solid #c8e6c9;
+    }
+    .dot-loader {
+        display: inline-block;
+        width: 32px;
+        height: 8px;
+    }
+    .dot-loader::after {
+        content: '';
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-left: 2px;
+        background-color: #555;
+        border-radius: 50%;
+        animation: blink 1.4s infinite both;
+    }
+    @keyframes blink {
+        0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+        40% { transform: scale(1); opacity: 1; }
+    }
+    .chat-box {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-height: 60vh;
+        overflow-y: auto;
+        margin-bottom: 12px;
+    }
 
-    st.markdown(
-        """
-        <style>
-        #chat-container { display: flex; flex-direction: column; height: 80vh; }
-        #history { flex: 1; overflow-y: auto; padding: 12px; }
-        .bubble { padding: 8px 12px; border-radius: 16px; margin: 6px 0; max-width: 70%; display: inline-block; }
-        .user { background-color: #fff; align-self: flex-end; }
-        .bot { background-color: #dcf8c6; align-self: flex-start; }
-        #input-area { display: flex; padding: 8px; border-top: 1px solid #ddd; }
-        #input-area input { flex: 1; padding: 8px 12px; border-radius: 20px; border: 1px solid #ccc; }
-        #input-area button { margin-left: 8px; padding: 8px 16px; border: none; border-radius: 20px;
-                              background-color: #25D366; color: white; cursor: pointer; }
-        .bubble_wrap { display: block; width: 100%; }
-        .bubble_sub_wrap { display: flex; }
-        .bubble_sub_wrap .user { margin-left: auto; }
-        </style>
-        """, unsafe_allow_html=True
-    )
+    .chat-row {
+        display: flex;
+        width: 100%;
+    }
 
-    # Build the entire HTML content for chat-container including history
-    history_html = "<div id='chat-container'>"
-    history_html += "<div id='history'>"
-    if st.session_state.history:
-        for turn in st.session_state.history:
-            history_html += f"<div class='bubble_wrap'>"
-            history_html += f"<div class='bubble_sub_wrap'><div class='bubble bot'><strong>Bot:</strong> {turn['a']}</div></div>"
-            history_html += f"<div class='bubble_sub_wrap'><div class='bubble user'><strong>You:</strong> {turn['q']}</div></div>"
-            history_html += f"</div>"
-    else:
-        history_html += "<div style='color:#666;'>Start the conversation...</div>"
-    history_html += "</div>"  # Close #history
-    history_html += "</div>"  # Close #chat-container
+    .user-row {
+        justify-content: flex-end;
+    }
 
-    # Auto-scroll JS
-    auto_scroll = (
-        "<script>"
-        "var hist = document.getElementById('history');"
-        "if(hist) { hist.scrollTop = hist.scrollHeight; }"
-        "</script>"
-    )
+    .bot-row {
+        justify-content: flex-start;
+    }
 
-    # Render chat container and scroll script
-    st.markdown(history_html + auto_scroll, unsafe_allow_html=True)
+    .chat-msg {
+        padding: 10px 16px;
+        border-radius: 16px;
+        max-width: 70%;
+        word-wrap: break-word;
+        font-size: 15px;
+    }
 
-    # Input form (outside raw HTML to use Streamlit widgets)
-    with st.form("chat_form", clear_on_submit=True):
-        st.markdown("<div id='input-area'>", unsafe_allow_html=True)
-        question = st.text_input("", placeholder="Type a message...")
-        submit = st.form_submit_button("Send")
-        st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    .user-msg {
+        background-color: #fff;
+        border: 1px solid #ddd;
+        color: #000;
+    }
+
+    .bot-msg {
+        background-color: #dcf8c6;
+        border: 1px solid #c8e6c9;
+        color: #000;
+    }
+
+    /* Loader animation */
+    .dot-loader {
+        display: inline-block;
+        width: 24px;
+        height: 8px;
+    }
+    .dot-loader::after {
+        content: '';
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        margin-left: 2px;
+        background-color: #555;
+        border-radius: 50%;
+        animation: blink 1.4s infinite both;
+    }
+    @keyframes blink {
+        0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+        40% { transform: scale(1); opacity: 1; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 
-    # Handle submission
-    if submit:
-        if not question or not question.strip():
-            st.error("❌ Please enter a valid message.")
+    # Chat container
+    chat_box = st.container()
+    with chat_box:
+        st.markdown('<div class="chat-box">', unsafe_allow_html=True)
+        if not st.session_state.get("history"):
+            st.markdown("<span style='color:#888'>Start the conversation...</span>", unsafe_allow_html=True)
         else:
-            data = {
-                "exact_answer": "This is a test answer."
-            }
-            if data.get("exact_answer"):
-                answer = {"message": "hi this is test"}
-            elif data.get("message"):
-                answer = data["message"]
-            else:
-                answer = "🙏 Sorry, no answer found."
+            for turn in st.session_state.history:
+                # User message (right-aligned)
+                st.markdown(f"""
+                <div class='chat-row user-row'>
+                    <div class='chat-msg user-msg'><strong>You:</strong> {turn['q']}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
-            st.session_state.history.append({"q": question, "a": answer})
+                # Bot message with loader or answer
+                if turn["a"] == "...":
+                    st.markdown("""
+                    <div class='chat-row bot-row'>
+                        <div class='chat-msg bot-msg'>
+                            <strong>Agent:</strong> <span class='dot-loader'></span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div class='chat-row bot-row'>
+                        <div class='chat-msg bot-msg'><strong>Agent:</strong> {turn['a']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Input row
+    col1, col2 = st.columns([6, 1])
+    with col1:
+        question = st.text_input("Type a message:", key="input_text", label_visibility="collapsed")
+    with col2:
+        send = st.button("Send", use_container_width=True)
+
+    # Handle message send
+    if send and question.strip():
+        st.session_state.history.append({"q": question, "a": "..."})
+        st.rerun()
+
+    # Handle response
+    if st.session_state.get("history") and st.session_state.history[-1]["a"] == "...":
+        last_q = st.session_state.history[-1]["q"]
+        try:
+            r = requests.get(f"{API_BASE_URL}/query/", params={"question": last_q})
+            data = r.json()
+        except Exception as e:
+            data = {"message": f"⚠️ API error: {e}"}
+
+        if data.get("exact_answer"):
+            answer = clean_thinker_section(data["exact_answer"])
+        elif data.get("message"):
+            answer = data["message"]
+        else:
+            answer = "🙏 Sorry, I couldn’t find an exact answer in my knowledge base."
+
+        st.session_state.history[-1]["a"] = answer
+        st.rerun()
 # —— Tab 2: Upload & View Documents ——
 with tab2:
     st.subheader("📤 Upload a Document")
