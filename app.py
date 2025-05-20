@@ -1,113 +1,134 @@
 import streamlit as st
 import requests
+import re
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-import pymysql
-import re
 
-# ---- Configuration ----
+# Page config
+PROJECT_NAME = "Scaigent"
 API_BASE_URL = "http://localhost:8000"
-DATABASE_URL = "mysql+pymysql://root:12345678@localhost/practice_document_rag_qa"
+st.set_page_config(page_title=f"🤖 {PROJECT_NAME}", layout="wide")
+st.title(f"🤖 {PROJECT_NAME}")
 
-st.set_page_config(page_title="🤖 SciAgent", layout="wide")
-st.title("🤖 SciAgent - Document Q&A Assistant")
+# Utility to clean thinker sections
+def clean_thinker_section(raw: str) -> str:
+    return re.sub(r"(\*\*)?<think>.*?</think>(\*\*)?", "", raw, flags=re.DOTALL).strip()
 
-def clean_thinker_section(raw_response: str) -> str:
-    # Remove <think>...</think> or **<think>...</think>** if present
-    return re.sub(r"(\*\*)?<think>.*?</think>(\*\*)?", "", raw_response, flags=re.DOTALL).strip()
+# Initialize session state
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-
-# ---- Tabs: Q&A | Upload Docs ----
+# Create two tabs: Chat and Document Management
 tab1, tab2 = st.tabs(["💬 Ask a Question", "📤 Upload & View Documents"])
 
-
-# ============================
-# 💬 Tab 1: Ask a Question
-# ============================
+# —— Tab 1: WhatsApp-style Chat UI ——
 with tab1:
-    st.subheader("🔎 Ask a question about uploaded documents")
+    # Inject custom CSS
+    st.markdown("<div id='chat-wrapper'>", unsafe_allow_html=True)
 
-    with st.form("question_form"):
-        question = st.text_input("Type your question:")
-        submit = st.form_submit_button("Ask")
+    st.markdown(
+        """
+        <style>
+        #chat-container { display: flex; flex-direction: column; height: 80vh; }
+        #history { flex: 1; overflow-y: auto; padding: 12px; }
+        .bubble { padding: 8px 12px; border-radius: 16px; margin: 6px 0; max-width: 70%; display: inline-block; }
+        .user { background-color: #fff; align-self: flex-end; }
+        .bot { background-color: #dcf8c6; align-self: flex-start; }
+        #input-area { display: flex; padding: 8px; border-top: 1px solid #ddd; }
+        #input-area input { flex: 1; padding: 8px 12px; border-radius: 20px; border: 1px solid #ccc; }
+        #input-area button { margin-left: 8px; padding: 8px 16px; border: none; border-radius: 20px;
+                              background-color: #25D366; color: white; cursor: pointer; }
+        .bubble_wrap { display: block; width: 100%; }
+        .bubble_sub_wrap { display: flex; }
+        .bubble_sub_wrap .user { margin-left: auto; }
+        </style>
+        """, unsafe_allow_html=True
+    )
 
+    # Build the entire HTML content for chat-container including history
+    history_html = "<div id='chat-container'>"
+    history_html += "<div id='history'>"
+    if st.session_state.history:
+        for turn in st.session_state.history:
+            history_html += f"<div class='bubble_wrap'>"
+            history_html += f"<div class='bubble_sub_wrap'><div class='bubble bot'><strong>Bot:</strong> {turn['a']}</div></div>"
+            history_html += f"<div class='bubble_sub_wrap'><div class='bubble user'><strong>You:</strong> {turn['q']}</div></div>"
+            history_html += f"</div>"
+    else:
+        history_html += "<div style='color:#666;'>Start the conversation...</div>"
+    history_html += "</div>"  # Close #history
+    history_html += "</div>"  # Close #chat-container
+
+    # Auto-scroll JS
+    auto_scroll = (
+        "<script>"
+        "var hist = document.getElementById('history');"
+        "if(hist) { hist.scrollTop = hist.scrollHeight; }"
+        "</script>"
+    )
+
+    # Render chat container and scroll script
+    st.markdown(history_html + auto_scroll, unsafe_allow_html=True)
+
+    # Input form (outside raw HTML to use Streamlit widgets)
+    with st.form("chat_form", clear_on_submit=True):
+        st.markdown("<div id='input-area'>", unsafe_allow_html=True)
+        question = st.text_input("", placeholder="Type a message...")
+        submit = st.form_submit_button("Send")
+        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+    # Handle submission
     if submit:
-        if not question.strip():
-            st.error("❌ Please enter a valid question.")
+        if not question or not question.strip():
+            st.error("❌ Please enter a valid message.")
         else:
-            try:
-                res = requests.get(f"{API_BASE_URL}/query/", params={"question": question})
-                data = res.json()
+            data = {
+                "exact_answer": "This is a test answer."
+            }
+            if data.get("exact_answer"):
+                answer = {"message": "hi this is test"}
+            elif data.get("message"):
+                answer = data["message"]
+            else:
+                answer = "🙏 Sorry, no answer found."
 
-                if "message" in data:
-                    st.warning(data["message"])
-                elif "exact_answer" in data and data["exact_answer"].strip():
-                    cleaned_answer = clean_thinker_section(data["exact_answer"])
-                    st.success("✅ Answer")
-                    st.markdown(f"**🧠 {cleaned_answer}**")
+            st.session_state.history.append({"q": question, "a": answer})
 
-                    if data.get("retrieved_documents"):
-                        st.markdown("📚 **Reference Documents:**")
-                        uniquedoc = set(data["retrieved_documents"])
-                        for doc in uniquedoc:
-                            st.write(f"• `{doc}`")
-                else:
-                    st.warning("🙏 Sorry, we couldn't find an answer to your question.")
-            except Exception as e:
-                st.error(f"⚠️ Error: {str(e)}")
-
-
-# ============================
-# 📤 Tab 2: Upload & View Docs
-# ============================
+# —— Tab 2: Upload & View Documents ——
 with tab2:
     st.subheader("📤 Upload a Document")
     uploaded_file = st.file_uploader("Upload PDF or DOCX", type=["pdf", "docx"])
-
     if uploaded_file:
         if uploaded_file.size > 5 * 1024 * 1024:
             st.error("❌ File too large! Max 5MB.")
         else:
             try:
                 files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
-                response = requests.post(f"{API_BASE_URL}/upload/", files=files)
-                result = response.json()
-
-                if "message" in result:
-                    st.success(f"✅ {result['message']}")
+                resp = requests.post(f"{API_BASE_URL}/upload/", files=files)
+                res = resp.json()
+                if res.get("message"):
+                    st.success(f"✅ {res['message']}")
                 else:
-                    st.error(result.get("error", "Upload failed."))
+                    st.error(res.get("error", "Upload failed."))
             except Exception as e:
-                st.error(f"🚨 Upload error: {str(e)}")
+                st.error(f"🚨 Upload error: {e}")
 
-    st.divider()
+    st.markdown("---")
     st.subheader("📁 Uploaded Documents")
-
     try:
-        engine = create_engine(DATABASE_URL)
+        engine = create_engine("mysql+pymysql://root:12345678@localhost/practice_document_rag_qa")
         SessionLocal = sessionmaker(bind=engine)
         db = SessionLocal()
-        docs = db.execute(text("SELECT filename, faiss_index FROM documents ORDER BY id DESC")).fetchall()
+        docs = db.execute(text("SELECT filename FROM documents ORDER BY id DESC")).fetchall()
         db.close()
 
         seen = set()
-        for doc in docs:
-            if doc.filename in seen:
+        for (fn,) in docs:
+            if fn in seen:
                 continue
-            seen.add(doc.filename)
-
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.write(f"📄 `{doc.filename}` ")
-            # Optional: Add delete functionality
-            # with col2:
-            #     if st.button("❌ Delete", key=doc.filename):
-            #         try:
-            #             res = requests.delete(f"{API_BASE_URL}/delete/", params={"filename": doc.filename})
-            #             result = res.json()
-            #             st.success(result.get("message", "Deleted"))
-            #             st.experimental_rerun()
-            #         except Exception as e:
-            #             st.error(f"⚠️ Delete failed: {str(e)}")
+            seen.add(fn)
+            st.write(f"📄 `{fn}`")
     except Exception as e:
-        st.error(f"⚠️ Failed to load documents: {str(e)}")
+        st.error(f"⚠️ Failed to load documents: {e}")

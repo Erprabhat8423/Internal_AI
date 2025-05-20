@@ -11,6 +11,10 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import dotenv
 from sqlalchemy.orm import Session
 from os import getenv
+from typing import List, Dict
+from pydantic import BaseModel
+from fastapi import Body
+
 dotenv.load_dotenv()
 GROQ_API_KEY = getenv("GROQ_API_KEY")
 
@@ -32,6 +36,10 @@ DATABASE_URL = "mysql+pymysql://root:12345678@localhost/practice_document_rag_qa
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+class QueryRequest(BaseModel):
+    question: str
+    history: List[Dict[str, str]]    # [{"q": "...", "a": "..."}, …]
 
 # SQLAlchemy Document model
 class Document(Base):
@@ -154,7 +162,7 @@ async def query_document(question: str = Query(..., description="Enter your sear
                 {"role": "system", "content": "You are a strict document-based QA assistant."},
                 {"role": "user", "content": strict_prompt}
             ],
-            temperature=0.0,
+            temperature=0.3,
             max_tokens=1000
         )
         exact_answer = response.choices[0].message.content.strip()
