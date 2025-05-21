@@ -15,6 +15,7 @@ from typing import List, Dict, Optional
 
 from pydantic import BaseModel
 from fastapi import Body
+from fastapi import HTTPException
 
 
 dotenv.load_dotenv()
@@ -83,8 +84,14 @@ load_faiss_index()
 # Upload document API
 @app.post("/upload/")
 async def upload_document(file: UploadFile = File(...)):
-    save_faiss_index()  # Save current state first
     content = ""
+    # ✅ Check if file already exists in the database
+    db = SessionLocal()
+    existing_doc = db.query(Document).filter_by(filename=file.filename).first()
+    if existing_doc:
+        db.close()
+        return {"error": f"File '{file.filename}' already exists."}
+
 
     if file.filename.endswith(".pdf"):
         content = extract_text_from_pdf(await file.read())
@@ -110,13 +117,15 @@ async def upload_document(file: UploadFile = File(...)):
         "faiss_index": faiss_index
     }
 
+def extract_list_items(text: str):
+    lines = text.strip().split("\n")
+    return [line.lstrip("•-123. ").strip() for line in lines if line.strip()]
 
 # Query documents
 @app.post("/query/")
 async def query_document(payload: QueryPayload):
     question = payload.question
     context = payload.context or ""
-
     query_embedding = get_embedding(question)
     k = 3
     distances, indices = index.search(np.array([query_embedding], dtype=np.float32), k)

@@ -48,6 +48,7 @@ st.markdown("""
 
 st.markdown(f"<div class='main-header'>🤖 {PROJECT_NAME}</div>", unsafe_allow_html=True)
 
+
 # Utility to clean thinker sections
 def clean_thinker_section(raw: str) -> str:
     return re.sub(r"(\*\*)?<think>.*?</think>(\*\*)?", "", raw, flags=re.DOTALL).strip()
@@ -64,6 +65,9 @@ def build_context_from_history():
 if "history" not in st.session_state:
     st.session_state.history = []
 
+if "bot_typing" not in st.session_state:
+    st.session_state.bot_typing = False
+
 # Create two tabs: Chat and Document Management
 tab1, tab2 = st.tabs(["💬 Ask a Question", "📤 Upload & View Documents"])
 
@@ -71,16 +75,20 @@ tab1, tab2 = st.tabs(["💬 Ask a Question", "📤 Upload & View Documents"])
 with tab1:
     st.markdown("""
     <style>
+    
     .chat-box {
         background: #f8f9fa;
-        padding: 12px;
+        
         border-radius: 12px;
+        
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05); /* ✨ Optional soft shadow */
         max-height: 60vh;
         overflow-y: auto;
         margin-bottom: 12px;
         display: flex;
         flex-direction: column;
     }
+                
     .chat-row {
         display: flex;
         width: 100%;
@@ -123,15 +131,24 @@ with tab1:
         0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
         40% { transform: scale(1); opacity: 1; }
     }
+    .fade-in {
+    animation: fadeInUp 0.4s ease-out;
+    }
+    @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+    }
+
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="chat-container">', unsafe_allow_html=True)
     chat_box = st.container()
+    
     with chat_box:
         st.markdown('<div class="chat-box">', unsafe_allow_html=True)
         if not st.session_state.get("history"):
-            st.markdown("<span style='color:#888'>Start the conversation...</span>", unsafe_allow_html=True)
+            st.markdown("<span style='color: #666; font-style: bolder; font-size: 14px;'>👋 Hi! I'm <b>Scaigent</b>, your AI support assistant.Ask me anything about your documents or company policies.</span>", unsafe_allow_html=True)
         else:
             for i, turn in enumerate(st.session_state.history):
                 st.markdown(f"""
@@ -164,16 +181,26 @@ with tab1:
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+                    # suggestions = turn.get("suggestions", [])
+                    # if suggestions:
+                    #     st.markdown("💡 <b>Suggested Follow-ups:</b>", unsafe_allow_html=True)
 
-                    # Show doc source
-                    # if turn.get("source"):
-                    #     st.markdown(f"""
-                    #         <div style='margin: 4px 0 12px 0;'>
-                    #             📄 source document: <a  style='color: #0d6efd; font-weight: 600;'>
-                    #             {turn['source']}</a>
-                    #         </div>
-                    #     """, unsafe_allow_html=True)
+                    #     cols = st.columns(len(suggestions))  # One column per suggestion
+                    #     for j, s in enumerate(suggestions):
+                    #         with cols[j]:
+                    #             if st.button(s, key=f"suggestion_{i}_{j}"):
+                    #                 st.session_state.input_text = s
+                    #                 st.rerun()
+
         st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("""
+            <script>
+            var chatBox = window.parent.document.querySelector('.chat-box');
+            if (chatBox) {
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+            </script>
+            """, unsafe_allow_html=True)
 
     with st.form("chat_form", clear_on_submit=True):
         col1, col2 = st.columns([6, 1])
@@ -191,8 +218,10 @@ with tab1:
         last_q = st.session_state.history[-1]["q"]
         context = build_context_from_history()
         try:
-            r = requests.post(f"{API_BASE_URL}/query/", json={"question": last_q, "context": context})
+            r = requests.post(f"{API_BASE_URL}/query/", json={"question": last_q, "context": context,"generate_suggestions": True})
+            
             data = r.json()
+            st.write(data)
         except Exception as e:
             data = {"message": f"API error"}
 
@@ -206,30 +235,38 @@ with tab1:
         st.session_state.history[-1]["a"] = answer
         if "source" in data:
             st.session_state.history[-1]["source"] = data["source"]
+        # if "suggestions" in data:
+        #     st.session_state.history[-1]["suggestions"] = data["suggestions"]
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
 # —— Tab 2: Upload & View Documents ——
 with tab2:
-    st.subheader("📤 Upload a Document")
-    uploaded_file = st.file_uploader("Upload PDF or DOCX", type=["pdf"])
+    st.markdown("## 📤 Upload a Document")
+    st.markdown("Upload a PDF file. Maximum size: **5MB**")
+
+    uploaded_file = st.file_uploader("Drag and drop or click to upload", type=["pdf"], label_visibility="collapsed")
+
     if uploaded_file:
         if uploaded_file.size > 5 * 1024 * 1024:
-            st.error("File too large! Max 5MB.")
+            st.error("🚫 File too large! Max 5MB.")
         else:
             try:
-                files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
-                resp = requests.post(f"{API_BASE_URL}/upload/", files=files)
-                res = resp.json()
+                with st.spinner("⏳ Uploading..."):
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
+                    resp = requests.post(f"{API_BASE_URL}/upload/", files=files)
+                    res = resp.json()
+
                 if res.get("message"):
                     st.success(f"✅ {res['message']}")
                 else:
                     st.error(res.get("error", "Upload failed."))
             except Exception as e:
-                st.error(f"Upload error")
+                st.error(f"🚨 Upload error: {e}")
 
     st.markdown("---")
-    st.subheader("📁 Uploaded Documents")
+    st.markdown("## 📁 Uploaded Documents")
+
     try:
         engine = create_engine("mysql+pymysql://root:12345678@localhost/practice_document_rag_qa")
         SessionLocal = sessionmaker(bind=engine)
@@ -237,11 +274,23 @@ with tab2:
         docs = db.execute(text("SELECT filename FROM documents ORDER BY id DESC")).fetchall()
         db.close()
 
+        # Optional: Add search box
+        search = st.text_input("🔎 Search documents", placeholder="Enter filename keyword...")
+
         seen = set()
         for (fn,) in docs:
-            if fn in seen:
+            if fn in seen or (search and search.lower() not in fn.lower()):
                 continue
             seen.add(fn)
-            st.write(f"📄 `{fn}`")
+
+            st.markdown(f"""
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                    <img src="https://api.iconify.design/vscode-icons:file-type-pdf.svg?width=20" width="20">
+                    <span style="color:#2b6cb0; font-weight:500;">{fn}</span>
+                </div>
+            """, unsafe_allow_html=True)
+
+        if not seen:
+            st.info("No documents found.")
     except Exception as e:
-        st.error(f"Failed to load documents")
+        st.error(f"❌ Failed to load documents: {e}")
