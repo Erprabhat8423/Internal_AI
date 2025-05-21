@@ -78,15 +78,24 @@ with tab1:
     
     .chat-box {
         background: #f8f9fa;
-        
         border-radius: 12px;
-        
         box-shadow: 0 2px 8px rgba(0,0,0,0.05); /* ✨ Optional soft shadow */
         max-height: 60vh;
         overflow-y: auto;
         margin-bottom: 12px;
         display: flex;
         flex-direction: column;
+        
+    }
+    .sticky-input {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background: white;
+        padding: 10px 30px;
+        box-shadow: 0 -1px 6px rgba(0,0,0,0.1);
+        z-index: 999;
     }
                 
     .chat-row {
@@ -148,7 +157,7 @@ with tab1:
     with chat_box:
         st.markdown('<div class="chat-box">', unsafe_allow_html=True)
         if not st.session_state.get("history"):
-            st.markdown("<span style='color: #666; font-style: bolder; font-size: 14px;'>👋 Hi! I'm <b>Scaigent</b>, your AI support assistant.Ask me anything about your documents or company policies.</span>", unsafe_allow_html=True)
+            st.markdown("<span style='color: #666;  font-size: 13px;'>👋 Hi! I'm <b>Scaigent</b>, your AI support assistant.Ask me anything about your documents or company policies.</span>", unsafe_allow_html=True)
         else:
             for i, turn in enumerate(st.session_state.history):
                 st.markdown(f"""
@@ -201,7 +210,7 @@ with tab1:
             }
             </script>
             """, unsafe_allow_html=True)
-
+    st.markdown('<div class="sticky-input">', unsafe_allow_html=True)
     with st.form("chat_form", clear_on_submit=True):
         col1, col2 = st.columns([6, 1])
         with col1:
@@ -285,7 +294,7 @@ with tab2:
 
             st.markdown(f"""
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-                    <img src="https://api.iconify.design/vscode-icons:file-type-pdf.svg?width=20" width="20">
+                    📤
                     <span style="color:#2b6cb0; font-weight:500;">{fn}</span>
                 </div>
             """, unsafe_allow_html=True)
